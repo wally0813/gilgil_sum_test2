@@ -30,8 +30,8 @@ struct ip_header
 	u_char ip_ttl;
 	u_char ip_protocol;
 	uint16_t ip_checksum;
-	uint8_t ip_srcaddr[6];
-	uint8_t ip_destaddr[6];
+	uint8_t ip_srcaddr[4];
+	uint8_t ip_destaddr[4];
 };
 
 struct tcp_header
