@@ -1,61 +1,8 @@
 #include <pcap.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <libnet.h>
 
-struct ether_addr
-{
-        u_char ether_addr_octet[6];
-};
- 
-struct ether_header
-{
-        struct  ether_addr ether_dhost;
-        struct  ether_addr ether_shost;
-        uint16_t ether_type;
-};
-
-
-struct ip_header
-{
-        u_char ip_header_len:4;
-        u_char ip_version:4;
-        u_char ip_tos;
-        uint16_t ip_total_length;
-        uint16_t ip_id;
-        u_char ip_frag_offset:5;
-        u_char ip_more_fragment:1;
-        u_char ip_dont_fragment:1;
-        u_char ip_reserved_zero:1;
-        u_char ip_frag_offset1;
-        u_char ip_ttl;
-        u_char ip_protocol;
-        uint16_t ip_checksum;
-        uint8_t ip_srcaddr[4];
-        uint8_t ip_destaddr[4];
-};
- 
-struct tcp_header
-{
-        uint16_t source_port;
-        uint16_t dest_port;
-        uint32_t sequence;
-        uint32_t acknowledge;
-        u_char ns:1;
-        u_char reserved_part1:3;
-        u_char data_offset:4;
-        u_char fin:1;
-        u_char syn:1;
-        u_char rst:1;
-        u_char psh:1;
-        u_char ack:1;
-        u_char urg:1;
-        u_char ecn:1;
-        u_char cwr:1;
-        uint16_t window;
-        uint16_t checksum;
-        uint16_t urgent_pointer;
-};
- 
 void usage() {
   printf("syntax: pcap_test <interface>\n");
   printf("sample: pcap_test wlan0\n");
@@ -125,9 +72,9 @@ int main(int argc, char* argv[]) {
 
   char* dev = argv[1];
   char errbuf[PCAP_ERRBUF_SIZE];
-  struct ether_header *eh;
-  struct ip_header *ih;
-  struct tcp_header *th;
+  struct libnet_ethernet_hdr *eh;
+  struct libnet_ipv4_hdr *ih;
+  struct libnet_tcp_hdr *th;
   pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
   if (handle == NULL) {
     fprintf(stderr, "couldn't open device %s: %s\n", dev, errbuf);
@@ -144,9 +91,9 @@ int main(int argc, char* argv[]) {
 
     printf("%u bytes captured\n", header->caplen);
 
-    eh = (struct ether_header *)packet;
-    ih = (struct ip_header *)(packet+sizeof(struct ether_header));
-    int ih_len = ih->ip_header_len;
+    eh = (struct libnet_ethernet_hdr *)packet;
+    ih = (struct libnet_ipv4_hdr *)(packet+sizeof(struct libnet_ethernet_hdr));
+    int ih_len = ih->ip_hl;
 
     printf("D-mac ");
     print_mac((uint8_t *)(&eh->ether_dhost));
@@ -157,23 +104,23 @@ int main(int argc, char* argv[]) {
     if (my_ntohs(eh->ether_type) == 0x0800){
 
 	    printf("S-ip ");
-	    print_ip((uint8_t *)(&ih->ip_srcaddr));
+	    print_ip((uint8_t *)(&ih->ip_src));
 	    
 	    printf("D-ip ");
-	    print_ip((uint8_t *)(&ih->ip_destaddr));
+	    print_ip((uint8_t *)(&ih->ip_dst));
     
-	    if (ih->ip_protocol == 0x06){
+	    if (ih->ip_p == 0x06){
    
-		    th = (struct tcp_header *)(packet+sizeof(struct ether_header)+sizeof(struct ip_header));
+		    th = (struct libnet_tcp_hdr *)(packet+sizeof(struct libnet_ethernet_hdr)+sizeof(struct libnet_ipv4_hdr));
 
 		    printf("S-port ");
-		    print_port((uint8_t *)(&th->source_port));
+		    print_port((uint8_t *)(&th->th_sport));
     
 		    printf("D-port ");
-		    print_port((uint8_t *)(&th->dest_port));
+		    print_port((uint8_t *)(&th->th_dport));
 
-		    off = th->data_offset*4;
-		    d_len = header->caplen-sizeof(ether_header)-ih_len-off;
+		    off = th->th_off*4;
+		    d_len = header->caplen-sizeof(libnet_ethernet_hdr)-ih_len-off;
 		    if (d_len > 10) d_len = 10;
 		    else if (d_len < 0) continue;
 		    print_data((uint8_t *)(packet+off),d_len);
