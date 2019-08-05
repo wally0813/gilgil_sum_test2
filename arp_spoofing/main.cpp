@@ -97,10 +97,10 @@ int main(int argc, char* argv[], char* envp[]) {
     mac_eth0(my_mac, dev);
 
 
-    memset(&send->eth.ether_dhost, 0xff, 6);
-    memcpy(&send->eth.ether_shost, &my_mac, 6);
-    memcpy(&send->target_mac, &my_mac, 6);
-    memset(&send->sender_mac, 0, 6);
+    memset(send->eth.ether_dhost, 0xff, 6);
+    memcpy(send->eth.ether_shost, &my_mac, 6);
+    memcpy(send->target_mac, &my_mac, 6);
+    memset(send->sender_mac, 0, 6);
 
     send->eth.ether_type = my_ntohs(0x0806);
     send->h_type = my_ntohs(1);
@@ -148,10 +148,10 @@ int main(int argc, char* argv[], char* envp[]) {
     spoofing->p_size = 4;
     spoofing->opcode = my_ntohs(2);
 
-    memcpy(&spoofing->eth.ether_dhost, &packet->sender_mac, 6);
-    memcpy(&spoofing->eth.ether_shost, &my_mac, 6);
-    memcpy(&spoofing->target_mac, &my_mac, 6);
-    memcpy(&spoofing->sender_mac, &packet->sender_mac, 6);
+    memcpy(spoofing->eth.ether_dhost, &packet->sender_mac, 6);
+    memcpy(spoofing->eth.ether_shost, &my_mac, 6);
+    memcpy(spoofing->target_mac, &my_mac, 6);
+    memcpy(spoofing->sender_mac, &packet->sender_mac, 6);
 
     insert_ip(spoofing->sender_ip, sender_ip);
     insert_ip(spoofing->target_ip, target_ip);
